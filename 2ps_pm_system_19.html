@@ -1,0 +1,1440 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2PS PM — Preventive Maintenance Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=Chakra+Petch:wght@400;500;600;700&display=swap');
+
+:root {
+  --bg:      #f0f2f5;
+  --surface: #ffffff;
+  --surface2:#f7f8fa;
+  --border:  #e2e6ea;
+  --border2: #d0d6de;
+  --accent:  #1a6ef5;
+  --accent2: #ff6b35;
+  --warn:    #e8960a;
+  --ok:      #17a865;
+  --text:    #1a202c;
+  --text2:   #6b7a8d;
+  --red:     #dc2626;
+  --cal-past:   #17a865;   /* สีเขียว – PM ผ่านไปแล้ว */
+  --cal-soon:   #e8960a;   /* สีเหลือง – ใกล้ถึง */
+  --cal-over:   #dc2626;   /* สีแดง – เลยกำหนดแล้ว */
+  --cr: 12px;
+  --shadow: 0 1px 3px rgba(0,0,0,.07), 0 1px 2px rgba(0,0,0,.04);
+  --shadow-md: 0 4px 12px rgba(0,0,0,.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;position:relative}
+
+/* ─── LOADING OVERLAY ─── */
+/* Loading overlay — fixed fullscreen, must be above all stacking contexts */
+#loadingOverlay{
+  position:fixed;inset:0;
+  background:rgba(255,255,255,.97);
+  z-index:99999;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;
+}
+#loadingOverlay.hidden{display:none!important}
+.spin-ring{
+  width:60px;height:60px;border-radius:50%;
+  border:4px solid #e2e6ea;
+  border-top-color:var(--accent);
+  animation:spin 1s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+.load-title{font-family:'Chakra Petch',monospace;font-size:18px;color:var(--accent);letter-spacing:2px;font-weight:700}
+.load-step{font-size:13px;color:var(--text2);min-height:20px;text-align:center;max-width:340px}
+.bar-track{
+  width:340px;height:10px;
+  background:#e9ecef;border-radius:999px;overflow:hidden;
+  box-shadow:inset 0 1px 3px rgba(0,0,0,.08);
+}
+.bar-fill{
+  height:100%;width:0%;
+  background:linear-gradient(90deg,var(--accent),#4f9aff);
+  border-radius:999px;
+  transition:width .25s ease-out;
+  position:relative;overflow:hidden;
+}
+.bar-fill::after{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent);
+  animation:shimmer 1.4s infinite;
+}
+@keyframes shimmer{0%{transform:translateX(-100%)}100%{transform:translateX(200%)}}
+.load-pct{font-family:'Chakra Petch',monospace;font-size:14px;color:var(--accent);font-weight:700}
+
+/* ─── HEADER ─── */
+.header{background:#fff;border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;gap:16px;height:60px;position:sticky;top:0;z-index:100;box-shadow:var(--shadow)}
+.logo{font-family:'Chakra Petch',monospace;font-weight:700;font-size:20px;color:var(--accent);letter-spacing:2px}
+.logo span{color:var(--accent2)}
+.header-sub{color:var(--text2);font-size:12px}
+.header-spacer{flex:1}
+.fname{font-size:12px;color:var(--ok);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.upload-btn{background:var(--accent);border:none;color:#fff;font-family:'Sarabun',sans-serif;font-weight:600;font-size:13px;padding:8px 18px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:7px;transition:background .15s;box-shadow:0 1px 3px rgba(26,110,245,.3)}
+.upload-btn:hover{background:#1558d6}
+.upload-btn:disabled{opacity:.45;cursor:not-allowed}
+
+/* ─── APP SHELL (sidebar layout) ─── */
+/* NOTE: no transform/filter/isolation here — would trap fixed overlay */
+.app-shell{display:flex;height:calc(100vh - 60px);overflow:hidden;position:relative;z-index:0}
+
+/* SIDEBAR */
+.sidebar{
+  width:220px;flex-shrink:0;
+  background:#fff;
+  border-right:1px solid var(--border);
+  display:flex;flex-direction:column;
+  overflow-y:auto;
+  box-shadow:2px 0 8px rgba(0,0,0,.04);
+}
+.sidebar-section{padding:14px 12px 6px;font-size:10px;font-weight:700;
+  text-transform:uppercase;letter-spacing:1.5px;color:var(--text2)}
+.sidebar-nav{list-style:none;padding:0 8px 12px}
+.sidebar-nav li{margin-bottom:2px}
+.snav-btn{
+  width:100%;text-align:left;border:none;background:none;
+  padding:10px 14px;border-radius:8px;
+  font-family:'Sarabun',sans-serif;font-size:13px;font-weight:500;
+  color:var(--text2);cursor:pointer;
+  display:flex;align-items:center;gap:10px;
+  transition:all .15s;
+}
+.snav-btn:hover{background:#f0f4ff;color:var(--accent)}
+.snav-btn.active{background:#eff6ff;color:var(--accent);font-weight:700;
+  box-shadow:inset 3px 0 0 var(--accent)}
+.snav-icon{width:18px;text-align:center;font-size:16px;flex-shrink:0}
+.snav-label{flex:1}
+.sidebar-divider{height:1px;background:var(--border);margin:8px 12px}
+
+/* CONTENT AREA */
+.content-area{flex:1;overflow-y:auto;background:var(--bg)}
+.content-inner{padding:24px;max-width:1400px}
+
+/* ─── MAIN (upload page, before dashboard) ─── */
+.main{padding:24px;max-width:1600px;margin:0 auto}
+
+/* ─── UPLOAD ZONE ─── */
+.upload-zone{border:2px dashed var(--border2);border-radius:var(--cr);padding:60px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;background:#fff;margin-bottom:22px;box-shadow:var(--shadow)}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--accent);background:#f0f5ff}
+.upload-zone svg{color:var(--accent);margin-bottom:12px}
+.upload-zone h3{font-size:17px;font-weight:600;margin-bottom:6px;color:var(--text)}
+.upload-zone p{color:var(--text2);font-size:13px}
+
+/* ─── INFO BANNER ─── */
+.info-banner{background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 16px;font-size:12px;color:#374151;margin-bottom:18px;line-height:1.7}
+.info-banner b{color:var(--accent)}
+
+/* ─── STATS ─── */
+.stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:14px;margin-bottom:22px}
+.stat-card{background:#fff;border:1px solid var(--border);border-radius:var(--cr);padding:16px 18px;position:relative;overflow:hidden;box-shadow:var(--shadow)}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;border-radius:var(--cr) var(--cr) 0 0}
+.stat-card.blue::before{background:var(--accent)}
+.stat-card.red::before{background:var(--red)}
+.stat-card.yellow::before{background:var(--warn)}
+.stat-card.orange::before{background:var(--accent2)}
+.stat-card.green::before{background:var(--ok)}
+.stat-label{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.8px;margin-bottom:5px}
+.stat-val{font-family:'Chakra Petch',monospace;font-size:28px;font-weight:700}
+.stat-card.blue .stat-val{color:var(--accent)}
+.stat-card.red .stat-val{color:var(--red)}
+.stat-card.yellow .stat-val{color:var(--warn)}
+.stat-card.orange .stat-val{color:var(--accent2)}
+.stat-card.green .stat-val{color:var(--ok)}
+.stat-sub{font-size:11px;color:var(--text2);margin-top:3px}
+
+/* ─── YARD CHIPS ─── */
+.sec-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text2);margin-bottom:10px}
+.yard-filters{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
+.yard-chip{border:1.5px solid var(--border2);background:#fff;color:var(--text2);padding:6px 14px;border-radius:20px;cursor:pointer;font-size:13px;font-weight:500;font-family:'Sarabun',sans-serif;transition:all .15s;user-select:none;display:flex;align-items:center;gap:6px;box-shadow:var(--shadow)}
+.yard-chip:hover{border-color:var(--accent);color:var(--accent)}
+.yard-chip.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(26,110,245,.3)}
+.yard-chip .cnt{background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px}
+.yard-chip:not(.active) .cnt{background:rgba(0,0,0,.06)}
+
+/* ─── TABS (hidden — replaced by sidebar) ─── */
+.tabs{display:none}
+.tab{display:none}
+
+/* ─── CALENDAR ─── */
+.cal-nav{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.cal-nav h2{font-family:'Chakra Petch',monospace;font-size:18px;font-weight:700;min-width:200px;text-align:center;color:var(--text)}
+
+/* ── Unified calendar header bar ── */
+.cal-header-bar{
+  display:grid;
+  grid-template-columns:1fr auto 1fr;
+  align-items:center;
+  gap:12px;
+  margin-bottom:16px;
+  padding:14px 20px;
+  background:#fff;
+  border:1.5px solid var(--border);
+  border-radius:14px;
+  box-shadow:var(--shadow-md);
+}
+.cal-header-left{
+  display:flex;align-items:center;gap:10px;
+  justify-content:flex-start;
+}
+.cal-header-centre{
+  display:flex;align-items:center;justify-content:center;
+}
+.cal-month-title{
+  font-family:'Chakra Petch',monospace;
+  font-size:20px;font-weight:700;
+  color:var(--text);
+  text-align:right;
+  letter-spacing:.5px;
+  white-space:nowrap;
+  margin:0;
+}
+.cal-header-right{
+  display:flex;align-items:center;
+  justify-content:flex-end;
+}
+.cal-yard-label{display:none}
+#calYardTags{display:flex;flex-wrap:wrap;gap:4px;align-items:center;justify-content:center}
+.cal-yard-tag{
+  /* Same font family as month title, 20% larger = 24px, red */
+  font-family:'Chakra Petch',monospace;
+  font-size:24px;
+  font-weight:700;
+  color:#dc2626;
+  letter-spacing:.5px;
+  white-space:nowrap;
+  background:none;
+  border:none;
+  padding:0;
+  display:inline-flex;align-items:center;gap:8px;
+}
+.cal-yard-tag.all{
+  font-family:'Chakra Petch',monospace;
+  font-size:24px;
+  font-weight:700;
+  color:#dc2626;
+  letter-spacing:.5px;
+  background:none;
+  border:none;
+  padding:0;
+}
+.nav-btn{background:#fff;border:1.5px solid var(--border2);color:var(--text2);width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;transition:all .15s;box-shadow:var(--shadow)}
+.nav-btn:hover{border-color:var(--accent);color:var(--accent)}
+.today-btn{background:#fff;border:1.5px solid var(--border2);color:var(--text2);padding:6px 14px;border-radius:8px;cursor:pointer;font-size:13px;font-family:'Sarabun',sans-serif;transition:all .15s;box-shadow:var(--shadow)}
+.today-btn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* LEGEND */
+.legend{display:flex;gap:18px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+.legend-item{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2)}
+.leg-dot{width:12px;height:12px;border-radius:3px}
+
+/* CALENDAR GRID */
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+.cal-hdr{text-align:center;font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:1px;padding:8px 4px}
+.cal-day{background:#fff;border:1.5px solid var(--border);border-radius:10px;min-height:86px;padding:7px 8px;transition:all .15s;box-shadow:var(--shadow)}
+.cal-day.other{opacity:.35;background:var(--bg)}
+.cal-day.today{border-color:#f59e0b;background:#fffbeb}
+.cal-day.today .dnum{color:#d97706;font-weight:700}
+.dnum{font-family:'Chakra Petch',monospace;font-size:13px;font-weight:600;color:#9ca3af;margin-bottom:5px}
+
+/* ── calendar day colour states ── */
+/* past: PM ผ่านไปแล้ว → เขียว */
+.cal-day.state-past{background:#f0fdf4;border-color:#86efac;cursor:pointer}
+.cal-day.state-past:hover{background:#dcfce7;border-color:#4ade80;transform:translateY(-1px);box-shadow:var(--shadow-md)}
+.cal-day.state-past .dnum{color:#15803d}
+/* soon: ยังไม่ถึง 30 วัน (วันนี้ถึง 30 วันข้างหน้า) → เหลือง */
+.cal-day.state-soon{background:#fffbeb;border-color:#fcd34d;cursor:pointer}
+.cal-day.state-soon:hover{background:#fef3c7;border-color:#f59e0b;transform:translateY(-1px);box-shadow:var(--shadow-md)}
+.cal-day.state-soon .dnum{color:#b45309}
+/* over: เลยกำหนดแล้ว → แดง */
+.cal-day.state-over{background:#fef2f2;border-color:#fca5a5;cursor:pointer}
+.cal-day.state-over:hover{background:#fee2e2;border-color:#ef4444;transform:translateY(-1px);box-shadow:var(--shadow-md)}
+.cal-day.state-over .dnum{color:#b91c1c}
+
+/* badge pill inside calendar cell */
+.dcnt{display:inline-flex;align-items:center;gap:4px;border-radius:6px;padding:3px 8px;font-family:'Chakra Petch',monospace;font-size:12px;font-weight:700;cursor:pointer;margin-bottom:2px;transition:opacity .15s}
+.dcnt:hover{opacity:.8}
+/* done = ทำ PM ไปแล้ว → เขียว */
+.dcnt-done{background:#dcfce7;color:#15803d;border:1px solid #86efac}
+/* due states */
+.dcnt-ok  {background:#dcfce7;color:#15803d;border:1px solid #86efac}
+.dcnt-soon{background:#fef3c7;color:#92400e;border:1px solid #fcd34d}
+.dcnt-over{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}
+/* legacy selectors (state-* on cell still controls background) */
+.state-past  .dcnt-done,.state-past .dcnt-ok{background:#dcfce7;color:#15803d}
+.state-soon  .dcnt-soon{background:#fef3c7;color:#92400e}
+.state-over  .dcnt-over{background:#fee2e2;color:#991b1b}
+.dhint{font-size:10px;color:var(--text2);margin-top:2px}
+/* Gate In badge — top-right corner of calendar cell */
+.gate-badge{
+  position:absolute;top:5px;right:6px;
+  background:#dbeafe;color:#1e40af;
+  border:1px solid #93c5fd;
+  border-radius:5px;
+  padding:1px 6px;
+  font-family:'Chakra Petch',monospace;
+  font-size:10px;font-weight:700;
+  cursor:pointer;
+  white-space:nowrap;
+  transition:background .15s;
+  z-index:2;
+}
+.gate-badge:hover{background:#bfdbfe;}
+/* cell needs relative positioning */
+.cal-day{position:relative;}
+
+/* ─── TABLE ─── */
+.sr{display:flex;gap:10px;margin-bottom:12px;align-items:center;flex-wrap:wrap}
+.si{background:#fff;border:1.5px solid var(--border2);color:var(--text);padding:8px 14px;border-radius:8px;font-family:'Sarabun',sans-serif;font-size:13px;outline:none;width:240px;transition:border-color .15s;box-shadow:var(--shadow)}
+.si:focus{border-color:var(--accent)}
+.si::placeholder{color:var(--text2)}
+.tw{background:#fff;border:1px solid var(--border);border-radius:var(--cr);overflow:auto;max-height:520px;box-shadow:var(--shadow)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:var(--surface2);padding:10px 13px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text2);white-space:nowrap;border-bottom:1.5px solid var(--border);position:sticky;top:0;z-index:2}
+td{padding:9px 13px;border-bottom:1px solid #f1f3f5;white-space:nowrap;color:var(--text)}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#f8f9fb}
+.badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:5px;font-size:11px;font-weight:600}
+.bw{background:#fef3c7;color:#92400e;border:1px solid #fde68a}
+.bd{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}
+.bo{background:#d1fae5;color:#065f46;border:1px solid #6ee7b7}
+.bb{background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe}
+.bg{background:#f3f4f6;color:#6b7280;border:1px solid #e5e7eb}
+
+/* ─── MODAL ─── */
+.mo{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px)}
+.mo.hidden{display:none}
+.modal{background:#fff;border:1px solid var(--border);border-radius:16px;width:100%;max-width:1020px;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.15)}
+.mhead{padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.mhead h3{font-size:15px;font-weight:600;flex:1;color:var(--text)}
+.mbody{padding:18px 22px;overflow-y:auto;flex:1}
+.mfoot{padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end;background:var(--surface2);border-radius:0 0 16px 16px}
+.btn{padding:8px 18px;border-radius:8px;font-family:'Sarabun',sans-serif;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:all .15s;display:flex;align-items:center;gap:6px}
+.btn:hover{opacity:.88}
+.btn-sec{background:#fff;color:var(--text2);border:1.5px solid var(--border2)}
+.btn-xl{background:#166534;color:#fff;box-shadow:0 1px 3px rgba(22,101,52,.3)}
+
+/* ─── PAGINATION ─── */
+.pag{display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap}
+.pb{background:#fff;border:1.5px solid var(--border2);color:var(--text2);padding:5px 11px;border-radius:6px;cursor:pointer;font-size:13px;font-family:'Sarabun',sans-serif;transition:all .15s;box-shadow:var(--shadow)}
+.pb:hover{border-color:var(--accent);color:var(--accent)}
+.pb.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.pi{font-size:12px;color:var(--text2)}
+
+.empty{text-align:center;padding:60px 20px;color:var(--text2);font-size:14px}
+/* ─── YARD SUMMARY ─── */
+.yard-section{background:#fff;border:1px solid var(--border);border-radius:var(--cr);margin-bottom:20px;overflow:hidden;box-shadow:var(--shadow)}
+.yard-section-head{
+  display:flex;align-items:center;gap:12px;
+  padding:14px 20px;
+  background:linear-gradient(135deg,#f8faff,#f0f5ff);
+  border-bottom:1px solid var(--border);
+  cursor:pointer;user-select:none;
+}
+.yard-section-head:hover{background:linear-gradient(135deg,#f0f5ff,#e8f0fe)}
+.yard-section-title{font-weight:700;font-size:15px;color:var(--text);flex:1}
+.yard-section-stats{display:flex;gap:10px;flex-wrap:wrap}
+.ys-stat{display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px}
+.ys-total {background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe}
+.ys-over  {background:#fef2f2;color:#991b1b;border:1px solid #fca5a5}
+.ys-soon  {background:#fefce8;color:#854d0e;border:1px solid #fef08a}
+.ys-ok    {background:#f0fdf4;color:#166534;border:1px solid #bbf7d0}
+.ys-noref {background:#f9fafb;color:#6b7280;border:1px solid #e5e7eb}
+.yard-section-body{padding:0}
+.yard-section-body.collapsed{display:none}
+.yard-sub-title{
+  font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;
+  color:var(--text2);padding:12px 20px 6px;
+  border-bottom:1px solid #f3f4f6;
+}
+.yard-export-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  background:#166534;color:#fff;border:none;
+  padding:5px 14px;border-radius:6px;font-size:12px;font-weight:600;
+  cursor:pointer;font-family:'Sarabun',sans-serif;
+  transition:opacity .15s;margin:10px 20px;
+}
+.yard-export-btn:hover{opacity:.85}
+.collapse-arrow{font-size:12px;color:var(--text2);transition:transform .2s}
+.yard-section-head.open .collapse-arrow{transform:rotate(180deg)}
+/* Yard tab chips */
+.ytab-chip{
+  display:inline-flex;align-items:center;gap:7px;
+  padding:8px 16px;border-radius:22px;
+  border:1.5px solid var(--border2);
+  background:#fff;color:var(--text2);
+  font-size:13px;font-weight:500;
+  cursor:pointer;transition:all .15s;
+  box-shadow:var(--shadow);user-select:none;
+  font-family:'Sarabun',sans-serif;
+}
+.ytab-chip:hover{border-color:var(--accent);color:var(--accent)}
+.ytab-chip-active{
+  background:var(--accent)!important;
+  border-color:var(--accent)!important;
+  color:#fff!important;font-weight:700;
+  box-shadow:0 2px 8px rgba(26,110,245,.3)!important;
+}
+.ytab-cnt{
+  background:rgba(255,255,255,.25);
+  padding:1px 7px;border-radius:10px;font-size:11px;
+}
+.ytab-chip:not(.ytab-chip-active) .ytab-cnt{background:rgba(0,0,0,.06);color:var(--text2)}
+/* Yard selected header (replaces collapsible head) */
+.yard-selected-head{
+  display:flex;align-items:center;gap:14px;
+  padding:16px 20px;
+  background:linear-gradient(135deg,#f0f5ff,#e8f0fe);
+  border-bottom:1px solid #bfdbfe;
+  flex-wrap:wrap;gap:12px;
+}
+.hidden{display:none!important}
+/* ─── SIDEBAR YARD CHIPS (vertical) ─── */
+.syard-chip{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:7px 10px;border-radius:7px;
+  border:1.5px solid transparent;
+  background:none;color:var(--text2);
+  font-family:'Sarabun',sans-serif;font-size:12px;font-weight:500;
+  cursor:pointer;transition:all .12s;user-select:none;
+}
+.syard-chip:hover{background:#f0f4ff;color:var(--accent)}
+.syard-chip.active{background:#eff6ff;color:var(--accent);font-weight:600;border-color:#bfdbfe}
+.syard-cnt{background:rgba(26,110,245,.1);color:var(--accent);padding:1px 7px;
+  border-radius:10px;font-size:10px;font-weight:700;flex-shrink:0}
+.syard-chip:not(.active) .syard-cnt{background:rgba(0,0,0,.06);color:var(--text2)}
+/* ─── SIDEBAR MINI STATS ─── */
+.sstat{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12px}
+.sstat-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.sstat-label{flex:1;color:var(--text2)}
+.sstat-val{font-family:'Chakra Petch',monospace;font-weight:700;font-size:13px;color:var(--text)}
+input[type=file]{display:none}
+</style>
+</head>
+<body>
+
+<!-- ═══ LOADING OVERLAY (position:fixed, z-index:99999) ═══ -->
+<div id="loadingOverlay" class="hidden" style="position:fixed;inset:0;z-index:99999;background:rgba(255,255,255,.97);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;">
+  <div class="spin-ring"></div>
+  <div class="load-title">กำลังประมวลผล…</div>
+  <div class="load-step" id="loadStep">เริ่มต้น</div>
+  <div class="bar-track" style="width:340px;height:10px;background:#e9ecef;border-radius:999px;overflow:hidden;">
+    <div class="bar-fill" id="loadBar" style="height:100%;width:0%;background:linear-gradient(90deg,#1a6ef5,#4f9aff);border-radius:999px;transition:width .25s ease-out;"></div>
+  </div>
+  <div class="load-pct" id="loadPct">0%</div>
+</div>
+
+<!-- ═══ HEADER ═══ -->
+<div class="header">
+  <div>
+    <div class="logo">2PS <span>PM</span></div>
+    <div class="header-sub">Preventive Maintenance Tracker</div>
+  </div>
+  <div class="header-spacer"></div>
+  <span class="fname" id="fnameLbl"></span>
+  <button class="upload-btn" id="upBtn" onclick="document.getElementById('fi').click()">
+    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+    อัพโหลดไฟล์ Excel
+  </button>
+  <input type="file" id="fi" accept=".xlsx,.xls" onchange="handleFile(event)">
+</div>
+
+<!-- ═══ APP SHELL ═══ -->
+<div class="app-shell">
+
+  <!-- SIDEBAR (hidden until data loaded) -->
+  <nav class="sidebar hidden" id="sidebar">
+    <!-- Logo mini -->
+    <div style="padding:16px 16px 8px;border-bottom:1px solid var(--border);margin-bottom:4px">
+      <div style="font-family:'Chakra Petch',monospace;font-weight:700;font-size:15px;color:var(--accent);letter-spacing:2px">
+        2PS <span style="color:var(--accent2)">PM</span>
+      </div>
+      <div id="sidebarFile" style="font-size:11px;color:var(--ok);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+    </div>
+
+    <!-- Yard filter -->
+    <div class="sidebar-section">🏭 เลือก Yard</div>
+    <div id="yardFilters" style="padding:4px 12px 10px;display:flex;flex-direction:column;gap:4px"></div>
+    <div class="sidebar-divider"></div>
+
+    <!-- Navigation -->
+    <div class="sidebar-section">เมนู</div>
+    <ul class="sidebar-nav">
+      <li>
+        <button class="snav-btn active" id="snav-calendar" onclick="switchTab('calendar',this)">
+          <span class="snav-icon">📅</span><span class="snav-label">ปฏิทิน PM</span>
+        </button>
+      </li>
+      <li>
+        <button class="snav-btn" id="snav-table" onclick="switchTab('table',this)">
+          <span class="snav-icon">📋</span><span class="snav-label">รายการครบ 30 วัน</span>
+        </button>
+      </li>
+      <li>
+        <button class="snav-btn" id="snav-all" onclick="switchTab('all',this)">
+          <span class="snav-icon">🚗</span><span class="snav-label">ข้อมูลทั้งหมด</span>
+        </button>
+      </li>
+      <li>
+        <button class="snav-btn" id="snav-yard" onclick="switchTab('yard',this)">
+          <span class="snav-icon">🏭</span><span class="snav-label">Storage & Aging PM</span>
+        </button>
+      </li>
+    </ul>
+    <div class="sidebar-divider"></div>
+
+    <!-- Stats mini -->
+    <div class="sidebar-section">สรุปข้อมูล</div>
+    <div id="sidebarStats" style="padding:4px 12px 14px"></div>
+  </nav>
+
+  <!-- CONTENT AREA -->
+  <div class="content-area" id="contentArea">
+    <div class="content-inner">
+
+      <!-- UPLOAD ZONE (shown before data loaded) -->
+      <div class="upload-zone" id="uz"
+        ondragover="event.preventDefault();this.classList.add('drag')"
+        ondragleave="this.classList.remove('drag')"
+        ondrop="handleDrop(event)"
+        onclick="document.getElementById('fi').click()" style="max-width:600px;margin:60px auto">
+        <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>
+        </svg>
+        <h3>ลากไฟล์มาวาง หรือคลิกเพื่อเลือกไฟล์</h3>
+        <p>รองรับ .xlsx / .xls — Sheet: Tracking Status</p>
+      </div>
+
+  <!-- DASHBOARD -->
+  <div id="dash" class="hidden">
+    <div class="info-banner" id="infoBanner"></div>
+    <div class="stats-row" id="statsRow"></div>
+
+    <!-- CALENDAR TAB -->
+    <div id="tab-calendar">
+      <!-- ── Calendar header: month nav + yard label in one row ── -->
+      <div class="cal-header-bar">
+        <!-- Left: nav buttons only -->
+        <div class="cal-header-left">
+          <button class="nav-btn" onclick="chMonth(-1)">‹</button>
+          <button class="nav-btn" onclick="chMonth(1)">›</button>
+          <button class="today-btn" onclick="goToday()">วันนี้</button>
+        </div>
+        <!-- Centre: yard name (bold red) -->
+        <div class="cal-header-centre">
+          <div id="calYardTags"></div>
+        </div>
+        <!-- Right: month + year title -->
+        <div class="cal-header-right">
+          <h2 id="calLabel" class="cal-month-title"></h2>
+        </div>
+      </div>
+      <div class="legend">
+        <div class="legend-item"><div class="leg-dot" style="background:#dcfce7;border:1.5px solid #86efac"></div>✅ ทำ PM ไปแล้ว (Last PM Date)</div>
+        <div class="legend-item"><div class="leg-dot" style="background:#fef3c7;border:1.5px solid #fcd34d"></div>📅 ใกล้ครบ 30 วัน (Due 0–30 วัน)</div>
+        <div class="legend-item"><div class="leg-dot" style="background:#fee2e2;border:1.5px solid #fca5a5"></div>⚠️ เลยกำหนดแล้ว (Due &lt;0 วัน)</div>
+        <div class="legend-item"><div class="leg-dot" style="background:#dbeafe;border:1.5px solid #93c5fd;border-radius:3px"></div>🔵 Gate In Rayong (มุมขวาบน)</div>
+        <div class="legend-item"><div class="leg-dot" style="background:#fef08a;border:2px solid #d97706;border-radius:50%"></div>วันนี้</div>
+      </div>
+      <div class="cal-grid" id="calGrid"></div>
+    </div>
+
+    <!-- DUE TABLE TAB -->
+    <div id="tab-table" class="hidden">
+      <div class="sr">
+        <input class="si" id="sDue" placeholder="ค้นหา VIN / Model / Yard…" oninput="dP=1;renderDue()">
+        <button class="btn btn-xl" onclick="exportDue()">
+          <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/></svg>
+          Export Excel ทั้งหมด
+        </button>
+      </div>
+      <div class="tw" id="dueWrap"></div>
+      <div class="pag" id="duePag"></div>
+    </div>
+
+    <!-- ALL TABLE TAB -->
+    <div id="tab-all" class="hidden">
+      <div class="sr">
+        <input class="si" id="sAll" placeholder="ค้นหา VIN / Model / Yard…" oninput="aP=1;renderAll()">
+      </div>
+      <div class="tw" id="allWrap"></div>
+      <div class="pag" id="allPag"></div>
+    </div>
+
+    <!-- YARD SUMMARY TAB -->
+    <div id="tab-yard" class="hidden">
+      <!-- Yard selector chips (inside this tab, independent of global filter) -->
+      <div id="yardTabSelectorWrap" style="margin-bottom:18px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#6b7280;margin-bottom:10px">
+          🏭 เลือก Yard ที่ต้องการดู
+        </div>
+        <div id="yardTabChips" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+      </div>
+      <div id="yardSummaryWrap"></div>
+    </div>
+    </div><!-- /content-inner -->
+  </div><!-- /content-area -->
+</div><!-- /app-shell -->
+
+<!-- ═══ DAY MODAL ═══ -->
+<div class="mo hidden" id="mOverlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="mhead">
+      <span id="mIcon" style="font-size:20px;line-height:1"></span>
+      <div style="flex:1;min-width:0">
+        <div id="mTitle" style="font-size:15px;font-weight:700;color:var(--text)"></div>
+        <div id="mSubtitle" style="font-size:11px;color:var(--text2);margin-top:1px"></div>
+      </div>
+      <span id="mCnt" class="badge bb" style="font-size:13px;padding:4px 12px"></span>
+    </div>
+    <!-- VIN quick-view strip (PM due only) -->
+    <div id="mVinStrip" class="hidden" style="padding:10px 20px 0;border-bottom:1px solid var(--border)">
+      <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">เลข VIN ทั้งหมด</div>
+      <div id="mVinList" style="display:flex;flex-wrap:wrap;gap:6px;max-height:130px;overflow-y:auto;padding-bottom:8px"></div>
+    </div>
+    <div class="mbody" id="mBody"></div>
+    <div class="mfoot">
+      <button class="btn btn-xl" onclick="exportModal()">
+        <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/></svg>
+        Export Excel
+      </button>
+      <button class="btn" style="background:#f3f4f6;color:#374151;border:1.5px solid #e5e7eb" onclick="copyVins()">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        Copy VIN
+      </button>
+      <button class="btn btn-sec" onclick="closeModal()">ปิด</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ══════════════ STATE ══════════════
+let cars = [], selYards = new Set();
+let calY = new Date().getFullYear(), calM = new Date().getMonth();
+let mData = [], mLabel = '';
+let dP = 1, aP = 1;
+const PG = 50;
+
+// ══════════════ LOADING ══════════════
+function showLoad(){ document.getElementById('loadingOverlay').classList.remove('hidden'); document.getElementById('upBtn').disabled=true; prog(0,'เริ่มต้น…'); }
+function hideLoad(){ document.getElementById('loadingOverlay').classList.add('hidden'); document.getElementById('upBtn').disabled=false; }
+function prog(pct, step){
+  document.getElementById('loadBar').style.width = pct+'%';
+  document.getElementById('loadPct').textContent = Math.round(pct)+'%';
+  if(step) document.getElementById('loadStep').textContent = step;
+}
+
+// ══════════════ FILE ══════════════
+function handleDrop(e){ e.preventDefault(); document.getElementById('uz').classList.remove('drag'); const f=e.dataTransfer.files[0]; if(f) processFile(f); }
+function handleFile(e){ const f=e.target.files[0]; if(f) processFile(f); e.target.value=''; }
+
+function processFile(file){
+  showLoad();
+  document.getElementById('fnameLbl').textContent = file.name;
+  const r = new FileReader();
+
+  // Real read progress: 0→40%
+  r.onprogress = e => {
+    if(e.lengthComputable) prog((e.loaded/e.total)*40, `กำลังอ่านไฟล์… ${Math.round((e.loaded/e.total)*40)}%`);
+  };
+
+  r.onload = e => {
+    prog(42, 'แปลงข้อมูล Excel…');
+    setTimeout(()=>{
+      try {
+        prog(52, 'โหลด Workbook…');
+        const wb = XLSX.read(e.target.result, {type:'array', cellDates:true});
+
+        prog(62, 'ค้นหา Sheet Tracking Status…');
+        const sn = wb.SheetNames.find(n=>/tracking\s*status/i.test(n)) || wb.SheetNames[0];
+        const ws = wb.Sheets[sn];
+
+        prog(72, 'แปลง Sheet เป็น JSON…');
+        const raw = XLSX.utils.sheet_to_json(ws, {raw:false, defval:''});
+
+        prog(82, `ประมวลผล ${raw.length.toLocaleString()} แถว…`);
+        setTimeout(()=>{ parseData(raw); prog(100,'เสร็จสิ้น ✓'); setTimeout(hideLoad,350); }, 30);
+      } catch(err){ hideLoad(); alert('อ่านไฟล์ไม่ได้: '+err.message); }
+    }, 40);
+  };
+  r.onerror = ()=>{ hideLoad(); alert('เกิดข้อผิดพลาดในการอ่านไฟล์'); };
+  r.readAsArrayBuffer(file);
+}
+
+// ══════════════ PARSE ══════════════
+/*
+  เงื่อนไขการกรองข้อมูล:
+  ① Location Yard   — อ่านคอลัมน์ location yard (NYB2 Phase1/2 รวมกัน)
+  ② Allocation Date — ว่าง = รถยังอยู่ใน Yard ✅ / มีวันที่ = ออกแล้ว ❌
+  ③ Storage Yard    — อ่านเป็นข้อมูลประกอบ
+  ④ Aging PM        — รับทั้งว่างและมีข้อมูล
+     มีค่า → ใช้เป็น refDate (หรือ lastPmDate ถ้าใหม่กว่า)
+     ว่าง  → ดู Gate In(Rayong) / PDI / Final check
+              ต้องมีคู่: GateIn+PDI หรือ GateIn+Final อย่างน้อย 1 คู่
+              ใช้วันที่ล่าสุดจากคอลัมน์ที่มีข้อมูล
+  Due Date = refDate + 30 วัน
+*/
+function parseData(rows){
+  cars = [];
+  if(!rows.length){ alert('ไม่พบข้อมูล'); return; }
+  const keys = Object.keys(rows[0]);
+  const fk = pat => keys.find(k => new RegExp(pat,'i').test(k.trim())) || null;
+
+  const kVin     = fk('^vin');
+  const kModel   = fk('model');
+  const kColor   = fk('color');
+  const kYard    = fk('location.*yard|yard.*location');
+  const kAlloc   = fk('allocation.*date|alloc.*date');
+  const kStorage = fk('storage.*yard');
+  const kAgingPM = fk('aging.*pm|pm.*aging');
+  const kGateIn  = fk('gate\\s*in.*rayong|rayong.*gate\\s*in|gate.*rayong');
+  const kPDI     = fk('^\\s*pdi\\s*$|pdi\\s*date|pdi.*complete');
+  const kFinal   = fk('final\\s*check');
+
+  const PM_N = 12;
+  const pmK = [];
+  for(let i=1;i<=PM_N;i++){
+    const k = keys.find(k => new RegExp('^\\s*PM\\s*'+i+'\\s*$','i').test(k.trim()));
+    pmK.push({ lbl:'PM'+i, k: k||null });
+  }
+
+  // Yards ที่ไม่ทำ PM — ข้ามทั้งหมด (BYD Factory, MAIN YARD LCB)
+  const SKIP_YARDS = /byd\s*factory|main\s*yard\s*lcb/i;
+
+  let skipAlloc=0, skipFull=0, skipYard=0;
+
+  rows.forEach(row => {
+    const vin = kVin ? String(row[kVin]||'').trim() : '';
+    if(!vin) return;
+
+    // ① Location Yard — ข้าม BYD Factory และ MAIN YARD LCB
+    const rawYard = kYard ? String(row[kYard]||'').trim() : '';
+    if(SKIP_YARDS.test(rawYard)){ skipYard++; return; }
+    const yard = normalizeYard(rawYard);
+
+    // ② Allocation Date ต้องว่าง
+    if(kAlloc && parseDate(row[kAlloc])){ skipAlloc++; return; }
+
+    // ③ Storage Yard
+    const storageYard = kStorage ? String(row[kStorage]||'').trim() : '';
+
+    // PM slots
+    let lastFilledIdx = -1, lastPmDate = null, lastPmLbl = '';
+    pmK.forEach((p,idx) => {
+      if(!p.k) return;
+      const v = String(row[p.k]||'').trim();
+      if(v){ lastFilledIdx=idx; const d=parseDate(v); if(d){lastPmDate=d;lastPmLbl=p.lbl;} }
+    });
+    const nextIdx = lastFilledIdx + 1;
+    if(nextIdx >= PM_N){ skipFull++; return; }
+    const nextPmLbl = pmK[nextIdx].lbl;
+
+    // ④ Aging PM → refDate
+    const agingPMDate = kAgingPM ? parseDate(row[kAgingPM]) : null;
+    const gateDate    = kGateIn  ? parseDate(row[kGateIn])  : null;
+    const pdiDate     = kPDI     ? parseDate(row[kPDI])     : null;
+    const finalDate   = kFinal   ? parseDate(row[kFinal])   : null;
+
+    let refDate=null, refSource='';
+
+    if(agingPMDate){
+      // Aging PM มีวันที่ → ใช้วันล่าสุดระหว่าง agingPMDate กับ lastPmDate
+      refDate = latestDate(lastPmDate, agingPMDate);
+      refSource = lastPmDate && lastPmDate >= agingPMDate ? lastPmLbl : 'Aging PM';
+    } else if(lastPmDate){
+      // ไม่มี Aging PM แต่มี PM ที่ทำแล้ว
+      refDate = lastPmDate; refSource = lastPmLbl;
+    } else {
+      // Aging PM ว่าง + ไม่มี PM → ดู Gate In / PDI / Final check
+      const hasPair1 = gateDate && pdiDate;
+      const hasPair2 = gateDate && finalDate;
+      if(hasPair1 || hasPair2){
+        const cands = [gateDate, pdiDate, finalDate].filter(Boolean);
+        refDate = cands.reduce((a,b)=>b>a?b:a, cands[0]);
+        const src=[];
+        if(gateDate) src.push('Gate In');
+        if(pdiDate)  src.push('PDI');
+        if(finalDate)src.push('Final Check');
+        refSource = src.join('+');
+      }
+      // ถ้าไม่มีคู่ที่ครบ → refDate = null (ยังรับเข้าระบบ แต่ไม่มี aging)
+    }
+
+    const today=new Date(); today.setHours(0,0,0,0);
+    let dueDate=null, agingDays=null, daysLeft=9999;
+    if(refDate){
+      dueDate   = new Date(refDate); dueDate.setDate(dueDate.getDate()+30);
+      agingDays = Math.floor((today-refDate)/86400000);
+      daysLeft  = Math.floor((dueDate-today)/86400000);
+    }
+
+    cars.push({
+      vin, model:kModel?row[kModel]:'', color:kColor?row[kColor]:'',
+      yard, storageYard,
+      lastPmDate, lastPmLbl, nextPmLbl,
+      agingPMDate, gateDate, pdiDate, finalDate,
+      refDate, refSource, dueDate, agingDays, daysLeft
+    });
+  });
+
+  const noRef = cars.filter(c=>!c.refDate).length;
+  const hasGateCol = cars.some(c=>c.gateDate);
+  document.getElementById('infoBanner').innerHTML =
+    'ℹ️ โหลดสำเร็จ: พบ <b>'+cars.length.toLocaleString()+' VIN</b> ใน Yard &nbsp;·&nbsp; '+
+    'ข้ามไป <b>'+skipYard.toLocaleString()+'</b> คัน (BYD Factory / MAIN YARD LCB) &nbsp;·&nbsp; '+
+    '<b>'+skipAlloc.toLocaleString()+'</b> คัน (Alloc Date มีแล้ว) &nbsp;·&nbsp; '+
+    '<b>'+skipFull.toLocaleString()+'</b> คัน (PM12 ครบ) &nbsp;·&nbsp; '+
+    '<b>'+noRef.toLocaleString()+'</b> คัน (ไม่มีวันอ้างอิง) &nbsp;·&nbsp; '+
+    (hasGateCol ? '🔵 พบข้อมูล Gate In' : '⚠️ ไม่พบคอลัมน์ Gate In');
+
+  initDash();
+}
+
+function latestDate(a,b){ if(!a)return b; if(!b)return a; return a>b?a:b; }
+
+function normalizeYard(r){
+  if(!r) return 'Unknown';
+  const s=String(r).trim();
+  if(/NYB2.*Phase\s*[12]/i.test(s)) return 'NYB2';
+  return s;
+}
+
+function parseDate(v){
+  if(!v) return null;
+  if(v instanceof Date && !isNaN(v)) return v;
+  const s=String(v).trim();
+  if(!s||s==='0'||s==='—') return null;
+  // Excel serial
+  const n=Number(s);
+  if(!isNaN(n)&&n>1000&&n<100000){ const d=new Date(Math.round((n-25569)*86400000)); if(!isNaN(d)) return d; }
+  let d=new Date(s); if(!isNaN(d)) return d;
+  // DD/MM/YYYY
+  const m=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if(m){ let y=parseInt(m[3]); if(y<100)y+=2000; if(y>2500)y-=543; d=new Date(y,parseInt(m[2])-1,parseInt(m[1])); if(!isNaN(d))return d; }
+  return null;
+}
+function fmt(d){ if(!d)return '—'; return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`; }
+
+// ══════════════ DASHBOARD ══════════════
+function initDash(){
+  document.getElementById('uz').classList.add('hidden');
+  document.getElementById('dash').classList.remove('hidden');
+  document.getElementById('sidebar').classList.remove('hidden');
+  document.getElementById('sidebarFile').textContent = document.getElementById('fnameLbl').textContent;
+  const yc={}; cars.forEach(c=>{ yc[c.yard]=(yc[c.yard]||0)+1; });
+  selYards=new Set(Object.keys(yc));
+  renderChips(yc); renderStats(); renderCal();
+  updateSidebarStats();
+}
+
+function updateSidebarStats(){
+  const c=filt(), today=new Date(); today.setHours(0,0,0,0);
+  const ov=c.filter(x=>x.daysLeft!==9999&&x.daysLeft<0).length;
+  const d30=c.filter(x=>x.daysLeft!==9999&&x.daysLeft>=0&&x.daysLeft<=30).length;
+  const ok=c.filter(x=>x.daysLeft>30).length;
+  document.getElementById('sidebarStats').innerHTML=
+    '<div class="sstat"><span class="sstat-dot" style="background:var(--accent)"></span><span class="sstat-label">ทั้งหมด</span><span class="sstat-val">'+c.length+'</span></div>'+
+    '<div class="sstat"><span class="sstat-dot" style="background:var(--red)"></span><span class="sstat-label">Overdue</span><span class="sstat-val" style="color:var(--red)">'+ov+'</span></div>'+
+    '<div class="sstat"><span class="sstat-dot" style="background:var(--warn)"></span><span class="sstat-label">ครบใน 30 วัน</span><span class="sstat-val" style="color:var(--warn)">'+d30+'</span></div>'+
+    '<div class="sstat"><span class="sstat-dot" style="background:var(--ok)"></span><span class="sstat-label">ปกติ</span><span class="sstat-val" style="color:var(--ok)">'+ok+'</span></div>';
+}
+
+function renderChips(yc){
+  const yards = Object.keys(yc).sort();
+  const container = document.getElementById('yardFilters');
+  container.innerHTML = '';
+
+  // "ทั้งหมด" chip
+  const allChip = document.createElement('div');
+  allChip.className = 'syard-chip active';
+  allChip.id = 'cALL';
+  allChip.innerHTML = '✅ ทั้งหมด <span class="syard-cnt">' + cars.length + '</span>';
+  allChip.onclick = toggleAll;
+  container.appendChild(allChip);
+
+  // Per-yard chips
+  yards.forEach(y => {
+    const chip = document.createElement('div');
+    chip.className = 'syard-chip active';
+    chip.id = 'c' + eid(y);
+    chip.innerHTML = '🏭 ' + y + ' <span class="syard-cnt">' + yc[y] + '</span>';
+    chip.onclick = function(){ toggleYard(this, y); };
+    container.appendChild(chip);
+  });
+}
+function eid(y){ return btoa(unescape(encodeURIComponent(y))).replace(/[^a-zA-Z0-9]/g,''); }
+function ej(s){ return s.replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+
+function toggleYard(el,y){
+  if(selYards.has(y))selYards.delete(y); else selYards.add(y);
+  el.classList.toggle('active',selYards.has(y));
+  updAllChip(); refresh();
+}
+function toggleAll(){
+  const ys=[...new Set(cars.map(c=>c.yard))];
+  const all=ys.every(y=>selYards.has(y));
+  if(all){
+    // ถ้าทุก yard ถูกเลือกอยู่ → clear ทั้งหมด (ยกเว้น ALL chip เอง)
+    selYards.clear();
+    document.querySelectorAll('.syard-chip:not(#cALL)').forEach(e=>e.classList.remove('active'));
+    document.getElementById('cALL')?.classList.remove('active');
+  } else {
+    // เลือกทั้งหมด
+    ys.forEach(y=>selYards.add(y));
+    document.querySelectorAll('.syard-chip').forEach(e=>e.classList.add('active'));
+  }
+  refresh();
+}
+function updAllChip(){
+  const ys=[...new Set(cars.map(c=>c.yard))];
+  const allSel = ys.length>0 && ys.every(y=>selYards.has(y));
+  document.getElementById('cALL')?.classList.toggle('active', allSel);
+}
+function filt(){ return cars.filter(c=>selYards.has(c.yard)); }
+function refresh(){ renderStats(); renderCal(); renderDue(); renderAll(); updateSidebarStats(); updateCalYardBanner(); }
+
+// ══════════════ STATS ══════════════
+function renderStats(){
+  const c=filt();
+  const tot=c.length;
+  const ov=c.filter(x=>x.daysLeft!==9999&&x.daysLeft<0).length;
+  const d7=c.filter(x=>x.daysLeft!==9999&&x.daysLeft>=0&&x.daysLeft<=7).length;
+  const d30=c.filter(x=>x.daysLeft!==9999&&x.daysLeft>=0&&x.daysLeft<=30).length;
+  const ok=c.filter(x=>x.daysLeft>30).length;
+  document.getElementById('statsRow').innerHTML=`
+    <div class="stat-card blue"><div class="stat-label">รถใน Yard (Alloc ว่าง)</div><div class="stat-val">${tot.toLocaleString()}</div><div class="stat-sub">ยังไม่ขายออก + มีช่อง PM ว่าง</div></div>
+    <div class="stat-card red"><div class="stat-label">เกิน 30 วัน (Overdue)</div><div class="stat-val">${ov.toLocaleString()}</div><div class="stat-sub">ต้องทำ PM ด่วน</div></div>
+    <div class="stat-card yellow"><div class="stat-label">ครบใน 7 วัน</div><div class="stat-val">${d7.toLocaleString()}</div><div class="stat-sub">เร่งด่วน</div></div>
+    <div class="stat-card orange"><div class="stat-label">ครบใน 30 วัน</div><div class="stat-val">${d30.toLocaleString()}</div><div class="stat-sub">นับจากวันนี้</div></div>
+    <div class="stat-card green"><div class="stat-label">ยังไม่ถึง 30 วัน</div><div class="stat-val">${ok.toLocaleString()}</div><div class="stat-sub">ปกติ</div></div>
+  `;
+}
+
+// ══════════════ CALENDAR ══════════════
+const MTH=['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+const DOW=['อา','จ','อ','พ','พฤ','ศ','ส'];
+
+function updateCalYardBanner(){
+  const tagsEl = document.getElementById('calYardTags');
+  if(!tagsEl) return;
+  const ys = [...selYards].sort();
+  const allYards = [...new Set(cars.map(c=>c.yard))].sort();
+  const isAll = allYards.length>0 && allYards.every(y=>selYards.has(y));
+
+  if(isAll || ys.length===0){
+    tagsEl.innerHTML = '<span class="cal-yard-tag all">ทั้งหมด ' + allYards.length + ' Yard</span>';
+  } else if(ys.length === 1){
+    tagsEl.innerHTML = '<span class="cal-yard-tag">' + ys[0] + '</span>';
+  } else {
+    // Multiple yards: join with separator
+    tagsEl.innerHTML = ys.map(y=>'<span class="cal-yard-tag">'+y+'</span>').join('<span style="color:#fca5a5;font-family:Chakra Petch,monospace;font-size:24px;padding:0 4px"> / </span>');
+  }
+}
+
+function renderCal(){
+  document.getElementById('calLabel').textContent=`${MTH[calM]} ${calY+543}`;
+  // Update yard label banner
+  updateCalYardBanner();
+  const c=filt(), today=new Date(); today.setHours(0,0,0,0);
+
+  // MAP 1 — วันที่ทำ PM จริง (lastPmDate) → สีเขียว
+  const pmDoneMap={};
+  c.forEach(x=>{
+    if(!x.lastPmDate) return;
+    const d=new Date(x.lastPmDate); d.setHours(0,0,0,0);
+    const k=`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    if(!pmDoneMap[k]) pmDoneMap[k]=[];
+    pmDoneMap[k].push(x);
+  });
+
+  // MAP 2 — Due Date (วันที่ครบ 30 วัน) → เหลือง / แดง
+  const dueMap={};
+  c.forEach(x=>{
+    if(!x.dueDate) return;
+    const d=new Date(x.dueDate); d.setHours(0,0,0,0);
+    const k=`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    if(!dueMap[k]) dueMap[k]=[];
+    dueMap[k].push(x);
+  });
+
+  // MAP 3 — Gate In (Rayong yard) date → badge สีฟ้า มุมขวาบน
+  const gateMap={};
+  c.forEach(x=>{
+    if(!x.gateDate) return;
+    const d=new Date(x.gateDate); d.setHours(0,0,0,0);
+    const k=`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    if(!gateMap[k]) gateMap[k]=[];
+    gateMap[k].push(x);
+  });
+
+  const fd=new Date(calY,calM,1), sdow=fd.getDay();
+  const dim=new Date(calY,calM+1,0).getDate();
+  const pmd=new Date(calY,calM,0).getDate();
+  const tc=Math.ceil((sdow+dim)/7)*7;
+
+  let h=DOW.map(d=>`<div class="cal-hdr">${d}</div>`).join('');
+
+  for(let i=0;i<tc;i++){
+    let day,mo,yr,oth=false;
+    if(i<sdow){day=pmd-sdow+1+i;mo=calM-1;yr=calY;if(mo<0){mo=11;yr--;}oth=true;}
+    else if(i>=sdow+dim){day=i-sdow-dim+1;mo=calM+1;yr=calY;if(mo>11){mo=0;yr++;}oth=true;}
+    else{day=i-sdow+1;mo=calM;yr=calY;}
+
+    const k=`${yr}-${mo}-${day}`;
+    const doneCars = pmDoneMap[k]||[];
+    const dueCars  = dueMap[k]||[];
+    const gateCars = gateMap[k]||[];
+    const cellDate = new Date(yr,mo,day); cellDate.setHours(0,0,0,0);
+    const diffDays = Math.floor((cellDate-today)/86400000);
+    const isT = !oth&&day===today.getDate()&&mo===today.getMonth()&&yr===today.getFullYear();
+    const dlbl = `${String(day).padStart(2,'0')}/${String(mo+1).padStart(2,'0')}/${yr}`;
+
+    const hasDone = doneCars.length>0;
+    const hasDue  = dueCars.length>0;
+    const hasGate = gateCars.length>0;
+    const hasAny  = hasDone||hasDue;
+
+    let cellState='';
+    if(hasDone) cellState='state-past';
+    else if(hasDue){
+      cellState = diffDays<0 ? 'state-over'
+                : diffDays<=30 ? 'state-soon'
+                : 'state-past';
+    }
+
+    let cls='cal-day';
+    if(oth)  cls+=' other';
+    if(isT&&!hasAny) cls+=' today';
+    if(cellState) cls+=` ${cellState}`;
+
+    // Gate In badge — top-right corner (สีฟ้า)
+    const gateBadge = hasGate && !oth
+      ? `<div class="gate-badge" onclick="event.stopPropagation();openModal('${dlbl}','${k}','gate')">🔵 ${gateCars.length}</div>`
+      : '';
+
+    // Main badges (PM done + due)
+    let badges='';
+    if(hasDone){
+      badges+=`<div class="dcnt dcnt-done" onclick="openModal('${dlbl}','${k}','done')">✅ ${doneCars.length} คัน (ทำแล้ว)</div>`;
+    }
+    if(hasDue){
+      let dueText, dueCls;
+      if(diffDays < 0){
+        dueText = '⚠️ เลยรอบ PM แล้ว ' + Math.abs(diffDays) + ' วัน · ' + dueCars.length + ' คัน';
+        dueCls  = 'dcnt dcnt-over';
+      } else if(diffDays === 0){
+        dueText = '🔔 ครบ PM วันนี้ · ' + dueCars.length + ' คัน';
+        dueCls  = 'dcnt dcnt-soon';
+      } else if(diffDays <= 30){
+        dueText = '📅 อีก ' + diffDays + ' วัน จะครบ PM · ' + dueCars.length + ' คัน';
+        dueCls  = 'dcnt dcnt-soon';
+      } else {
+        dueText = '🚗 อีก ' + diffDays + ' วัน · ' + dueCars.length + ' คัน';
+        dueCls  = 'dcnt dcnt-ok';
+      }
+      badges += '<div class="' + dueCls + '" onclick="openModal(\'' + dlbl + '\',\'' + k + '\',\'due\')">' + dueText + '</div>';
+    }
+
+    // If only due cars (no done), make whole cell clickable too
+    const cellClick = (!hasDone && hasDue)
+      ? `onclick="openModal('${dlbl}','${k}','due')" style="cursor:pointer"`
+      : '';
+
+    h+=`<div class="${cls}" ${cellClick}>
+      ${gateBadge}
+      <div class="dnum">${day}${isT?' •':''}</div>
+      ${hasAny ? `${badges}<div class="dhint">📥 คลิกเพื่อดู VIN &amp; Export</div>` : ''}
+    </div>`;
+  }
+  document.getElementById('calGrid').innerHTML=h;
+}
+function chMonth(d){ calM+=d; if(calM>11){calM=0;calY++;} if(calM<0){calM=11;calY--;} renderCal(); }
+function goToday(){ const t=new Date(); calY=t.getFullYear(); calM=t.getMonth(); renderCal(); }
+
+// ══════════════ MODAL ══════════════
+// current modal type for export filename
+let mType='';
+
+function openModal(dlbl,key,type){
+  const [yr,mo,dy]=key.split('-').map(Number);
+  const all=filt();
+  let c, title, subtitle='', icon='📋', showVins=false, exportName='';
+
+  if(type==='done'){
+    c=all.filter(x=>{
+      if(!x.lastPmDate)return false;
+      const d=new Date(x.lastPmDate); d.setHours(0,0,0,0);
+      return d.getFullYear()===yr&&d.getMonth()===mo&&d.getDate()===dy;
+    });
+    title=`ทำ PM ไปแล้ว — ${dlbl}`;
+    subtitle='รถที่บันทึก Last PM Date ในวันนี้';
+    icon='✅'; exportName=`PM_Done_${dlbl.replace(/\//g,'-')}`;
+  } else if(type==='gate'){
+    c=all.filter(x=>{
+      if(!x.gateDate)return false;
+      const d=new Date(x.gateDate); d.setHours(0,0,0,0);
+      return d.getFullYear()===yr&&d.getMonth()===mo&&d.getDate()===dy;
+    });
+    title=`Gate In (Rayong) — ${dlbl}`;
+    subtitle='รถที่เข้า Rayong yard ในวันนี้';
+    icon='🔵'; exportName=`GateIn_${dlbl.replace(/\//g,'-')}`;
+  } else {
+    // type === 'due' — PM due (เลยหรือใกล้ครบ)
+    c=all.filter(x=>{
+      if(!x.dueDate)return false;
+      const d=new Date(x.dueDate); d.setHours(0,0,0,0);
+      return d.getFullYear()===yr&&d.getMonth()===mo&&d.getDate()===dy;
+    });
+    const today=new Date(); today.setHours(0,0,0,0);
+    const cellDate=new Date(yr,mo,dy); cellDate.setHours(0,0,0,0);
+    const diff=Math.floor((cellDate-today)/86400000);
+    if(diff<0){
+      title=`⚠️ เลยกำหนด PM — ${dlbl}`;
+      subtitle=`เลยกำหนดมาแล้ว ${Math.abs(diff)} วัน — ต้องรีบทำ PM ด่วน`;
+      icon='⚠️';
+    } else if(diff===0){
+      title=`🔔 ครบ PM วันนี้ — ${dlbl}`;
+      subtitle='ถึงกำหนด PM วันนี้เลย!';
+      icon='🔔';
+    } else {
+      title=`📅 ครบ PM — ${dlbl}`;
+      subtitle=`อีก ${diff} วันจะครบ 30 วัน`;
+      icon='📅';
+    }
+    showVins=true;
+    exportName=`PM_Due_${dlbl.replace(/\//g,'-')}`;
+  }
+
+  mData=c; mLabel=dlbl; mType=exportName;
+
+  // Header
+  document.getElementById('mIcon').textContent=icon;
+  document.getElementById('mTitle').textContent=title;
+  document.getElementById('mSubtitle').textContent=`${subtitle}`;
+  document.getElementById('mCnt').textContent=`${c.length} คัน`;
+
+  // VIN strip — only for PM due
+  const vinStrip=document.getElementById('mVinStrip');
+  const vinList=document.getElementById('mVinList');
+  if(showVins && c.length>0){
+    vinStrip.classList.remove('hidden');
+    vinList.innerHTML=c.map(x=>`<span style="
+      background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;
+      border-radius:5px;padding:2px 10px;font-family:'Chakra Petch',monospace;
+      font-size:12px;font-weight:600;cursor:default;
+      ">${x.vin}</span>`).join('');
+  } else {
+    vinStrip.classList.add('hidden');
+    vinList.innerHTML='';
+  }
+
+  document.getElementById('mBody').innerHTML=buildTable(c);
+  document.getElementById('mOverlay').classList.remove('hidden');
+}
+function closeModal(){ document.getElementById('mOverlay').classList.add('hidden'); }
+function exportModal(){ toExcel(mData,`${mType||'PM_Export'}.xlsx`); }
+function copyVins(){
+  const vins=mData.map(x=>x.vin).join('\n');
+  navigator.clipboard.writeText(vins).then(()=>{
+    const btn=event.target.closest('button');
+    const orig=btn.innerHTML;
+    btn.innerHTML='✓ Copied!';
+    btn.style.background='#d1fae5';
+    btn.style.color='#065f46';
+    setTimeout(()=>{ btn.innerHTML=orig; btn.style.background=''; btn.style.color=''; },1800);
+  }).catch(()=>{ alert(mData.map(x=>x.vin).join(', ')); });
+}
+
+// ══════════════ DUE TABLE ══════════════
+function renderDue(){
+  const q=(document.getElementById('sDue')?.value||'').toLowerCase();
+  let c=filt().filter(x=>x.daysLeft!==9999&&x.daysLeft<=30);
+  if(q) c=c.filter(x=>x.vin.toLowerCase().includes(q)||x.model.toLowerCase().includes(q)||x.yard.toLowerCase().includes(q));
+  c.sort((a,b)=>a.dueDate-b.dueDate);
+  const pg=Math.ceil(c.length/PG); dP=Math.min(dP,Math.max(1,pg));
+  document.getElementById('dueWrap').innerHTML=buildTable(c.slice((dP-1)*PG,dP*PG));
+  paginate('duePag',dP,pg,p=>{dP=p;renderDue();});
+}
+function exportDue(){
+  const c=filt().filter(x=>x.daysLeft!==9999&&x.daysLeft<=30).sort((a,b)=>a.dueDate-b.dueDate);
+  toExcel(c,`PM_Due_All_${fmt(new Date()).replace(/\//g,'-')}.xlsx`);
+}
+
+// ══════════════ ALL TABLE ══════════════
+function renderAll(){
+  const q=(document.getElementById('sAll')?.value||'').toLowerCase();
+  let c=filt();
+  if(q) c=c.filter(x=>x.vin.toLowerCase().includes(q)||x.model.toLowerCase().includes(q)||x.yard.toLowerCase().includes(q));
+  const pg=Math.ceil(c.length/PG); aP=Math.min(aP,Math.max(1,pg));
+  document.getElementById('allWrap').innerHTML=buildTable(c.slice((aP-1)*PG,aP*PG));
+  paginate('allPag',aP,pg,p=>{aP=p;renderAll();});
+}
+
+// ══════════════ TABLE HTML ══════════════
+function buildTable(c){
+  if(!c.length) return '<div class="empty">ไม่พบข้อมูล</div>';
+  let h='<table><thead><tr>'
+    +'<th>#</th><th>VIN</th><th>Model</th><th>Color</th>'
+    +'<th>Yard</th><th>Storage Yard</th>'
+    +'<th>Gate In (Rayong)</th><th>PDI</th><th>Final Check</th>'
+    +'<th>Last PM</th><th>PM ถัดไป</th>'
+    +'<th>Ref Date (วันอ้างอิง)</th><th>Ref Source</th>'
+    +'<th>Due Date (+30 วัน)</th><th>Aging (วัน)</th><th>คงเหลือ</th><th>Status</th>'
+    +'</tr></thead><tbody>';
+  c.forEach((x,i)=>{
+    const l = x.daysLeft === 9999 ? null : x.daysLeft;
+    let badge, lCell;
+    if(l===null){
+      badge='<span class="badge bg">ไม่มีวันอ้างอิง</span>';
+      lCell='<span style="color:var(--text2)">—</span>';
+    } else if(l<0){
+      badge='<span class="badge bd">⚠️ เกิน '+Math.abs(l)+' วัน</span>';
+      lCell='<span style="color:var(--red);font-weight:600">เกิน '+Math.abs(l)+' วัน</span>';
+    } else if(l<=7){
+      badge='<span class="badge bw">🔔 อีก '+l+' วัน</span>';
+      lCell='<span style="color:var(--warn)">อีก '+l+' วัน</span>';
+    } else if(l<=30){
+      badge='<span class="badge bw">📅 อีก '+l+' วัน</span>';
+      lCell='<span style="color:#f97316">อีก '+l+' วัน</span>';
+    } else {
+      badge='<span class="badge bo">✅ ปกติ</span>';
+      lCell='<span style="color:var(--text2)">อีก '+l+' วัน</span>';
+    }
+    // ref source badge colour
+    const srcCls = x.refSource && x.refSource.includes('PM') ? 'bb'
+                 : x.refSource ? 'bg' : 'bg';
+    h+='<tr>'
+      +'<td style="color:var(--text2)">'+(i+1)+'</td>'
+      +'<td style="font-family:\'Chakra Petch\',monospace;color:var(--accent);font-weight:600">'+x.vin+'</td>'
+      +'<td>'+(x.model||'—')+'</td>'
+      +'<td>'+(x.color||'—')+'</td>'
+      +'<td><span class="badge bb">'+(x.yard||'—')+'</span></td>'
+      +'<td style="color:var(--text2);font-size:12px">'+(x.storageYard||'—')+'</td>'
+      +'<td style="font-size:12px">'+(x.gateDate?fmt(x.gateDate):'<span style="color:#d1d5db">—</span>')+'</td>'
+      +'<td style="font-size:12px">'+(x.pdiDate?fmt(x.pdiDate):'<span style="color:#d1d5db">—</span>')+'</td>'
+      +'<td style="font-size:12px">'+(x.finalDate?fmt(x.finalDate):'<span style="color:#d1d5db">—</span>')+'</td>'
+      +'<td style="font-size:12px">'+(x.lastPmDate?fmt(x.lastPmDate)+' <span style="font-size:10px;color:var(--text2)">('+x.lastPmLbl+')</span>':'<span style="color:#d1d5db">—</span>')+'</td>'
+      +'<td><span class="badge bg">'+(x.nextPmLbl||'—')+'</span></td>'
+      +'<td style="font-family:\'Chakra Petch\',monospace;font-size:12px;font-weight:600">'+(x.refDate?fmt(x.refDate):'<span style="color:#d1d5db">—</span>')+'</td>'
+      +'<td><span class="badge '+srcCls+'" style="font-size:10px">'+(x.refSource||'—')+'</span></td>'
+      +'<td style="font-family:\'Chakra Petch\',monospace">'+(x.dueDate?fmt(x.dueDate):'—')+'</td>'
+      +'<td style="font-family:\'Chakra Petch\',monospace">'+(x.agingDays!==null?x.agingDays:'—')+'</td>'
+      +'<td>'+lCell+'</td>'
+      +'<td>'+badge+'</td>'
+      +'</tr>';
+  });
+  return h+'</tbody></table>';
+}
+
+// ══════════════ PAGINATION ══════════════
+function paginate(id,cur,tot,cb){
+  if(tot<=1){document.getElementById(id).innerHTML='';return;}
+  let h=`<span class="pi">หน้า ${cur}/${tot}</span>`;
+  if(cur>1)h+=`<button class="pb" onclick="(${cb.toString()})(${cur-1})">‹ ก่อนหน้า</button>`;
+  const s=Math.max(1,cur-2),e=Math.min(tot,cur+2);
+  for(let p=s;p<=e;p++) h+=`<button class="pb${p===cur?' active':''}" onclick="(${cb.toString()})(${p})">${p}</button>`;
+  if(cur<tot)h+=`<button class="pb" onclick="(${cb.toString()})(${cur+1})">ถัดไป ›</button>`;
+  document.getElementById(id).innerHTML=h;
+}
+
+// ══════════════ EXPORT ══════════════
+function toExcel(c,fn){
+  const rows=[['VIN','Model','Color','Yard','Storage Yard',
+    'Gate In (Rayong)','PDI','Final Check Date',
+    'Last PM Date','Last PM Label','PM ถัดไป',
+    'Ref Date','Ref Source','Due Date (+30 วัน)',
+    'Aging (วัน)','คงเหลือ (วัน)','Status']];
+  c.forEach(x=>{
+    let st; const l = x.daysLeft===9999?null:x.daysLeft;
+    if(l===null)st='ไม่มีวันอ้างอิง';
+    else if(l<0)st='เกิน '+Math.abs(l)+' วัน (Overdue)';
+    else if(l<=7)st='เร่งด่วน ≤7 วัน';
+    else if(l<=30)st='ใกล้ครบ 30 วัน';
+    else st='ปกติ';
+    rows.push([
+      x.vin, x.model, x.color, x.yard, x.storageYard||'',
+      x.gateDate?fmt(x.gateDate):'',
+      x.pdiDate?fmt(x.pdiDate):'',
+      x.finalDate?fmt(x.finalDate):'',
+      x.lastPmDate?fmt(x.lastPmDate):'',
+      x.lastPmLbl||'', x.nextPmLbl||'',
+      x.refDate?fmt(x.refDate):'',
+      x.refSource||'',
+      x.dueDate?fmt(x.dueDate):'',
+      x.agingDays!==null?x.agingDays:'',
+      l!==null?l:'', st
+    ]);
+  });
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[20,16,10,14,14,14,12,14,14,10,10,14,14,14,10,12,22].map(w=>({wch:w}));
+  XLSX.utils.book_append_sheet(wb,ws,'PM Due List');
+  XLSX.writeFile(wb,fn);
+}
+
+// ══════════════ YARD SUMMARY ══════════════
+function renderYardSummary(){
+  const c = filt();
+
+  // Build full yardMap
+  const yardMap = {};
+  c.forEach(x=>{
+    const y = x.yard||'Unknown';
+    if(!yardMap[y]) yardMap[y]=[];
+    yardMap[y].push(x);
+  });
+
+  const yards = Object.keys(yardMap).sort();
+  if(!yards.length){
+    document.getElementById('yardSummaryWrap').innerHTML='<div class="empty">ไม่พบข้อมูล</div>';
+    document.getElementById('yardTabChips').innerHTML='';
+    return;
+  }
+
+  // Default: select first yard if none or invalid
+  if(!selectedTabYard || !yardMap[selectedTabYard]) selectedTabYard = yards[0];
+
+  // Build chip selector
+  const chipsHtml = yards.map(y=>{
+    const cnt = yardMap[y].length;
+    const isActive = y === selectedTabYard;
+    const yid2 = btoa(unescape(encodeURIComponent(y))).replace(/[^a-zA-Z0-9]/g,'');
+    return '<div class="ytab-chip '+(isActive?'ytab-chip-active':'')+'" id="ytchip-'+yid2+'"'
+      +' onclick="selectTabYard(\''+y.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\')">🏭 '+y+' <span class="ytab-cnt">'+cnt+'</span></div>';
+  }).join('');
+  document.getElementById('yardTabChips').innerHTML = chipsHtml;
+
+  renderSelectedYard(yardMap[selectedTabYard], selectedTabYard);
+}
+
+let selectedTabYard = null;
+
+function selectTabYard(yard){
+  selectedTabYard = yard;
+  renderYardSummary();
+}
+
+function renderSelectedYard(rows, yard){
+  const total = rows.length;
+  const over  = rows.filter(x=>x.daysLeft!==9999&&x.daysLeft<0).length;
+  const soon  = rows.filter(x=>x.daysLeft!==9999&&x.daysLeft>=0&&x.daysLeft<=30).length;
+  const ok2   = rows.filter(x=>x.daysLeft>30).length;
+  const noref = rows.filter(x=>x.daysLeft===9999).length;
+  const expYard = yard.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+
+  const html = '<div class="yard-section">'
+    +'<div class="yard-selected-head">'
+    +'<span style="font-size:22px">🏭</span>'
+    +'<div style="flex:1"><div style="font-size:17px;font-weight:700;color:var(--text)">'+yard+'</div>'
+    +'<div style="font-size:12px;color:var(--text2);margin-top:2px">Storage Yard &amp; Aging PM</div></div>'
+    +'<div class="yard-section-stats">'
+    +'<span class="ys-stat ys-total">📦 '+total+' คัน</span>'
+    +(over>0?'<span class="ys-stat ys-over">⚠️ เกิน '+over+'</span>':'')
+    +(soon>0?'<span class="ys-stat ys-soon">📅 ครบใน 30 วัน '+soon+'</span>':'')
+    +'<span class="ys-stat ys-ok">✅ ปกติ '+ok2+'</span>'
+    +(noref>0?'<span class="ys-stat ys-noref">❓ ไม่มีอ้างอิง '+noref+'</span>':'')
+    +'</div>'
+    +'<button class="yard-export-btn" onclick="exportYard(\''+expYard+'\')">'
+    +'<svg width="12" height="12" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/></svg> Export Excel</button>'
+    +'</div>'
+    +'<div class="yard-section-body">'+buildYardTable(rows)+'</div>'
+    +'</div>';
+
+  document.getElementById('yardSummaryWrap').innerHTML = html;
+}
+function toggleYardSection(yid){
+  const head = document.getElementById('yhead-'+yid);
+  const body = document.getElementById('ybody-'+yid);
+  const isOpen = !body.classList.contains('collapsed');
+  if(isOpen){ body.classList.add('collapsed'); head.classList.remove('open'); }
+  else { body.classList.remove('collapsed'); head.classList.add('open'); }
+}
+
+function buildYardTable(rows){
+  if(!rows.length) return '<div class="empty">ไม่พบข้อมูล</div>';
+  const today=new Date(); today.setHours(0,0,0,0);
+  let h = '<div class="tw"><table><thead><tr>'
+    +'<th>#</th><th>VIN</th><th>Model</th><th>Color</th>'
+    +'<th>Storage Yard</th>'
+    +'<th>Gate In (Rayong)</th>'
+    +'<th>Aging PM (Ref Date)</th><th>Ref Source</th>'
+    +'<th>Due Date</th><th>Aging (วัน)</th><th>คงเหลือ</th><th>Status</th>'
+    +'</tr></thead><tbody>';
+
+  // Sort: overdue first, then by daysLeft asc
+  const sorted = [...rows].sort((a,b)=>{
+    if(a.daysLeft===9999&&b.daysLeft!==9999)return 1;
+    if(b.daysLeft===9999&&a.daysLeft!==9999)return -1;
+    return a.daysLeft-b.daysLeft;
+  });
+
+  sorted.forEach((x,i)=>{
+    const l = x.daysLeft===9999?null:x.daysLeft;
+    let badge, rowStyle='';
+    if(l===null){
+      badge='<span class="badge bg">ไม่มีวันอ้างอิง</span>';
+    } else if(l<0){
+      badge='<span class="badge bd">⚠️ เกิน '+Math.abs(l)+' วัน</span>';
+      rowStyle='background:#fff5f5';
+    } else if(l<=7){
+      badge='<span class="badge bw">🔔 อีก '+l+' วัน</span>';
+      rowStyle='background:#fffbeb';
+    } else if(l<=30){
+      badge='<span class="badge bw">📅 อีก '+l+' วัน</span>';
+    } else {
+      badge='<span class="badge bo">✅ ปกติ</span>';
+    }
+    const lCell = l===null?'—':l<0?'<b style="color:#dc2626">เกิน '+Math.abs(l)+'</b>':'อีก '+l+' วัน';
+
+    h+='<tr style="'+rowStyle+'">'
+      +'<td style="color:var(--text2)">'+(i+1)+'</td>'
+      +'<td style="font-family:\'Chakra Petch\',monospace;color:var(--accent);font-weight:600">'+x.vin+'</td>'
+      +'<td>'+(x.model||'—')+'</td>'
+      +'<td>'+(x.color||'—')+'</td>'
+      +'<td style="font-size:12px">'+(x.storageYard||'<span style=\"color:#d1d5db\">—</span>')+'</td>'
+      +'<td style="font-size:12px">'+(x.gateDate?'<b style=\"color:#1e40af\">'+fmt(x.gateDate)+'</b>':'<span style=\"color:#d1d5db\">—</span>')+'</td>'
+      +'<td style="font-family:\'Chakra Petch\',monospace;font-size:12px">'+(x.refDate?fmt(x.refDate):'<span style=\"color:#d1d5db\">—</span>')+'</td>'
+      +'<td><span class="badge bg" style="font-size:10px">'+(x.refSource||'—')+'</span></td>'
+      +'<td style="font-family:\'Chakra Petch\',monospace">'+(x.dueDate?fmt(x.dueDate):'—')+'</td>'
+      +'<td style="font-family:\'Chakra Petch\',monospace">'+(x.agingDays!==null?x.agingDays:'—')+'</td>'
+      +'<td>'+lCell+'</td>'
+      +'<td>'+badge+'</td>'
+      +'</tr>';
+  });
+  return h+'</tbody></table></div>';
+}
+
+function exportYard(yard){
+  const rows = filt().filter(c=>c.yard===yard);
+  toExcel(rows, 'Storage_Aging_'+yard.replace(/[^a-zA-Z0-9]/g,'_')+'.xlsx');
+}
+
+// ══════════════ TABS ══════════════
+function switchTab(n,el){
+  // Update sidebar nav active state
+  ['calendar','table','all','yard'].forEach(t=>{
+    const btn=document.getElementById('snav-'+t);
+    if(btn) btn.classList.toggle('active',t===n);
+  });
+  // Show/hide content panels
+  ['calendar','table','all','yard'].forEach(t=>document.getElementById('tab-'+t).classList.toggle('hidden',t!==n));
+  if(n==='table') renderDue();
+  if(n==='all') renderAll();
+  if(n==='yard') renderYardSummary();
+  // Scroll content to top
+  const ca=document.getElementById('contentArea');
+  if(ca) ca.scrollTop=0;
+}
+</script>
+</body>
+</html>
